@@ -1,0 +1,450 @@
+<!doctype html><html lang=es><head><meta charset=UTF-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Volty Studio - Onboarding</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel=stylesheet><script src=https://cdn.tailwindcss.com></script><script>tailwind.config={theme:{extend:{colors:{brand:"#88ff70",dark:"#0f172a"},fontFamily:{sans:["Inter","sans-serif"]}}}}</script><link rel=stylesheet href=style.css><script crossorigin src=https://unpkg.com/react@18/umd/react.production.min.js></script><script crossorigin src=https://unpkg.com/react-dom@18/umd/react-dom.production.min.js></script><script src=https://unpkg.com/@babel/standalone/babel.min.js></script><script src=https://unpkg.com/jspdf@latest/dist/jspdf.umd.min.js></script><script src=https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js></script><script src=https://cdn.jsdelivr.net/npm/signature_pad@4.0.0/dist/signature_pad.umd.min.js></script><script src=https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.0/FileSaver.min.js></script><script src=config.js></script><style>.pdf-preview-container{height:calc(100vh - 40px)}</style></head><body class="antialiased selection:bg-brand selection:text-black overflow-hidden relative bg-slate-900 text-white"><div id=root></div><script type=text/babel>const { useState, useEffect, useRef } = React;
+        const { jsPDF } = window.jspdf;
+
+        // --- UTILS ---
+
+        const isValidDNI = (dni) => {
+            if (!dni) return false;
+            const standardDni = dni.toUpperCase().replace(/\s/g, '').replace(/-/g, '');
+            const dniRegex = /^([XYZ]?\d{5,8})([A-Z])$/;
+            const match = standardDni.match(dniRegex);
+            if (!match) return false;
+            const numberPart = match[1].replace('X', '0').replace('Y', '1').replace('Z', '2');
+            const letterPart = match[2];
+            const letters = "TRWAGMYFPDXBNJZSQVHLCKE";
+            const index = parseInt(numberPart) % 23;
+            return letters[index] === letterPart;
+        };
+
+        const generatePDF = (docType, userData, signatureDataUrl) => {
+            const doc = new jsPDF();
+            const pageWidth = doc.internal.pageSize.getWidth();
+            // Tighter margins for 1-page fit
+            const margin = 15;
+            let cursorY = 15;
+
+            // Header
+            doc.setFontSize(14);
+            doc.setFont("helvetica", "bold");
+            const title = docType === 'NDA' ? 'ACUERDO DE CONFIDENCIALIDAD (NDA)' : 'PROTECCIÓN DE DATOS (GDPR)';
+            doc.text(title, pageWidth / 2, cursorY, { align: 'center' });
+            cursorY += 8;
+
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.text("Volty Studio", pageWidth / 2, cursorY, { align: 'center' });
+            cursorY += 15;
+
+            // Body
+            doc.setFontSize(10); // Smaller font size to fit single page
+
+            let textBody = "";
+            const dateStr = new Date().toLocaleDateString('es-ES');
+            const companyName = "Volty Studio";
+
+            if (docType === 'NDA') {
+                textBody = `
+Yo, ${userData.name}, con documento de identidad (DNI/NIF) ${userData.dni}, residente en ${userData.country} y usuario de Discord ${userData.discordUser}, en adelante "EL RECEPTOR", por la presente reconozco y acuerdo lo siguiente con ${companyName}:
+
+1. OBJETO Y ALCANCE
+El Receptor entiende que en el curso de su colaboración podría tener acceso a información confidencial, incluyendo: código fuente, estrategias, datos de clientes y secretos comerciales.
+
+2. OBLIGACIONES DE CONFIDENCIALIDAD
+El Receptor se compromete de manera irrevocable a:
+   a) No divulgar, copiar, reproducir ni distribuir la Información Confidencial.
+   b) Utilizar dicha información exclusivamente para los fines de su colaboración.
+   c) Proteger la información con el máximo grado de cuidado.
+
+3. PROPIEDAD INTELECTUAL
+Toda la información compartida sigue siendo propiedad exclusiva de ${companyName}.
+
+4. EXCLUSIONES
+La obligación de confidencialidad no se aplica a información que sea de dominio público o que deba ser revelada por ley.
+
+5. DURACIÓN Y JURISDICCIÓN
+Este acuerdo es efectivo a partir de la fecha de firma (${dateStr}) y permanecerá vigente de manera indefinida.
+
+Firmado en ${userData.country}, a ${dateStr}.
+                `;
+            } else {
+                textBody = `
+Yo, ${userData.name}, con documento de identidad ${userData.dni}, residente en ${userData.country}, consiento expresamente el tratamiento de mis datos personales por parte de ${companyName}.
+
+1. RESPONSABLE DEL TRATAMIENTO
+La entidad responsable es ${companyName}.
+
+2. FINALIDAD Y LEGITIMACIÓN
+Sus datos serán tratados para gestionar la relación contractual y colaboración. La base legal es el consentimiento y la ejecución del contrato.
+
+3. CONSERVACIÓN
+Los datos se conservarán mientras dure la relación y posteriormente durante los plazos legales.
+
+4. DERECHOS DEL INTERESADO
+Usted tiene derecho a acceder, rectificar, suprimir, oponerse y limitar el tratamiento de sus datos contactando con ${companyName}.
+
+5. CONFIRMACIÓN
+Al firmar, confirmo que acepto la Política de Privacidad de ${companyName} (https://foro.voltymc.net/privacy).
+
+Firmado en ${userData.country}, a ${dateStr}.
+                `;
+            }
+
+            const splitText = doc.splitTextToSize(textBody.trim(), pageWidth - (margin * 2));
+            doc.text(splitText, margin, cursorY);
+
+            // Move cursor down roughly based on line count (+ small padding)
+            // 10pt font ~ 3.5mm height, using 5mm linespacing
+            cursorY += (splitText.length * 5) + 10;
+
+            // Signature Logic for Single Page
+            // If we are too low, force new page, but we optimized to try to stay on page 1
+            if (cursorY > 260) {
+                doc.addPage();
+                cursorY = 20;
+            }
+
+            doc.setFont("helvetica", "bold");
+            doc.text("Firma del Interesado:", margin, cursorY);
+            cursorY += 5;
+
+            // Signature Box / Image
+            if (signatureDataUrl) {
+                const imgWidth = 50;
+                const imgHeight = 25;
+                doc.addImage(signatureDataUrl, 'PNG', margin, cursorY, imgWidth, imgHeight);
+            } else {
+                doc.setDrawColor(200);
+                doc.rect(margin, cursorY, 40, 20);
+                doc.setFontSize(8);
+                doc.setTextColor(150);
+                doc.text("(Pendiente de Firma)", margin + 2, cursorY + 10);
+            }
+
+            return doc.output('blob');
+        };
+
+        // --- COMPONENTS ---
+
+        const SignatureCanvas = ({ initialData, onEnd, className }) => {
+            const canvasRef = useRef(null);
+            const signaturePadRef = useRef(null);
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+
+                const pad = new SignaturePad(canvas, {
+                    penColor: 'rgb(0, 0, 0)',
+                    backgroundColor: 'rgba(255, 255, 255, 1)'
+                });
+                signaturePadRef.current = pad;
+
+                if (initialData) {
+                    pad.fromDataURL(initialData);
+                }
+
+                pad.addEventListener("endStroke", () => {
+                    if (onEnd) onEnd(pad.toDataURL());
+                });
+
+                const resizeObserver = new ResizeObserver(entries => {
+                    for (const entry of entries) {
+                        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+                        const width = entry.contentRect.width;
+                        const height = entry.contentRect.height;
+
+                        if (width === 0 || height === 0) return;
+
+                        canvas.width = width * ratio;
+                        canvas.height = height * ratio;
+                        canvas.getContext("2d").scale(ratio, ratio);
+
+                        // Clear and reload to prevent stretching
+                        pad.clear();
+                        if (initialData) pad.fromDataURL(initialData, { ratio });
+                    }
+                });
+
+                resizeObserver.observe(canvas);
+
+                return () => {
+                    resizeObserver.disconnect();
+                    pad.off();
+                }
+            }, [initialData]);
+
+            const clear = () => {
+                signaturePadRef.current.clear();
+                if (onEnd) onEnd(null);
+            };
+
+            return (
+                <div className={`relative ${className} w-full`} style={{ height: '128px' }}>
+                    <canvas
+                        ref={canvasRef}
+                        className="w-full h-full border-2 border-dashed border-gray-300 rounded-md touch-none block"
+                    />
+                    <button
+                        onClick={clear}
+                        type="button"
+                        className="absolute top-2 right-2 text-xs text-red-500 hover:text-red-700 font-semibold bg-white/80 px-2 py-1 rounded"
+                    >
+                        Borrar
+                    </button>
+                </div>
+            );
+        };
+
+        const FloatingSidebar = ({ title, children, onNext, onPrev, nextLabel, nextDisabled }) => {
+            return (
+                <div className="absolute top-4 right-4 bottom-4 w-96 glass-card rounded-2xl p-6 flex flex-col animate-fade-in z-30 shadow-2xl">
+                    <h2 className="text-xl font-bold text-neon mb-4">{title}</h2>
+                    <div className="flex-1 overflow-y-auto">
+                        {children}
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-white/10 flex gap-3">
+                        {onPrev && (
+                            <button
+                                onClick={onPrev}
+                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-bold transition-colors text-sm"
+                            >
+                                Atrás
+                            </button>
+                        )}
+                        {onNext && (
+                            <button
+                                onClick={onNext}
+                                disabled={nextDisabled}
+                                className="flex-1 btn-primary py-3 rounded-lg font-bold disabled:opacity-50 text-sm"
+                            >
+                                {nextLabel || "Siguiente"}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const Step1 = ({ data, onChange, onNext }) => {
+            const [errors, setErrors] = useState({});
+
+            const validate = () => {
+                const newErrors = {};
+                if (!data.name) newErrors.name = "Obligatorio";
+                if (!data.dni || !isValidDNI(data.dni)) newErrors.dni = "DNI Inválido";
+                if (!data.country) newErrors.country = "Obligatorio";
+                if (!data.discordUser) newErrors.discordUser = "Obligatorio";
+
+                setErrors(newErrors);
+                return Object.keys(newErrors).length === 0;
+            };
+
+            const handleNext = () => {
+                if (validate()) onNext();
+            };
+
+            const InputClass = (error) => `w-full bg-white/5 border ${error ? 'border-red-500' : 'border-white/10'} rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all backdrop-blur-sm`;
+
+            return (
+                /* Ensure background is dark here too just in case */
+                <div className="flex items-center justify-center min-h-screen p-4 bg-slate-900 bg-gradient-to-br from-slate-900 via-slate-900 to-black">
+                    <main className="w-full max-w-lg glass-card rounded-2xl p-8 relative z-20">
+                        <div className="text-center mb-6">
+                            <img src="logobesidetitle-sinfondo.png" alt="Volty" className="h-12 mx-auto mb-2 object-contain" />
+                            <h2 className="text-2xl font-bold text-neon">Datos Personales</h2>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-sm text-gray-300">Nombre Completo</label>
+                                <input value={data.name} onChange={e => onChange('name', e.target.value)} className={InputClass(errors.name)} />
+                                {errors.name && <span className="text-red-400 text-xs">{errors.name}</span>}
+                            </div>
+                            <div>
+                                <label className="text-sm text-gray-300">DNI / NIF</label>
+                                <input value={data.dni} onChange={e => onChange('dni', e.target.value)} className={InputClass(errors.dni)} />
+                                {errors.dni && <span className="text-red-400 text-xs">{errors.dni}</span>}
+                            </div>
+                            <div>
+                                <label className="text-sm text-gray-300">País</label>
+                                <select value={data.country} onChange={e => onChange('country', e.target.value)} className={InputClass(errors.country)}>
+                                    <option value="">Seleccionar</option>
+                                    <option value="España">España</option>
+                                    <option value="México">México</option>
+                                    <option value="Argentina">Argentina</option>
+                                    <option value="Colombia">Colombia</option>
+                                    <option value="Otro">Otro</option>
+                                </select>
+                                {errors.country && <span className="text-red-400 text-xs">{errors.country}</span>}
+                            </div>
+                            <div>
+                                <label className="text-sm text-gray-300">Discord</label>
+                                <input value={data.discordUser} onChange={e => onChange('discordUser', e.target.value)} className={InputClass(errors.discordUser)} />
+                                {errors.discordUser && <span className="text-red-400 text-xs">{errors.discordUser}</span>}
+                            </div>
+                            <button onClick={handleNext} className="w-full btn-primary py-3 rounded-lg font-bold mt-4">Siguiente</button>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const DocumentSplitView = ({ title, docType, userData, onSignatureChange, signature, onNext, onPrev }) => {
+            const [pdfUrl, setPdfUrl] = useState(null);
+
+            useEffect(() => {
+                const blob = generatePDF(docType, userData, signature);
+                const url = URL.createObjectURL(blob);
+                setPdfUrl(url);
+                return () => URL.revokeObjectURL(url);
+            }, [userData, signature, docType]);
+
+            return (
+                <div className="w-full h-screen flex bg-gray-900 relative">
+
+                    {/* LEFT: Full Screen PDF */}
+                    <div className="flex-1 h-full bg-gray-800 relative z-10 box-border p-0">
+                        {pdfUrl ? (
+                            <iframe src={pdfUrl} className="w-full h-full border-none" title="Preview"></iframe>
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-white">Generando...</div>
+                        )}
+                    </div>
+
+                    {/* RIGHT: Floating Sidebar */}
+                    <FloatingSidebar
+                        title={title}
+                        onNext={onNext}
+                        onPrev={onPrev}
+                        nextDisabled={!signature}
+                    >
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-300 leading-relaxed">
+                                Por favor, revisa el documento a la izquierda. Si estás de acuerdo, firma en el recuadro inferior para continuar.
+                            </p>
+
+                            <div className="bg-white/5 p-4 rounded-lg border border-white/10">
+                                <label className="text-sm text-neon font-bold mb-2 block">Tu Firma:</label>
+                                <SignatureCanvas
+                                    initialData={signature}
+                                    onEnd={onSignatureChange}
+                                    className="bg-white rounded"
+                                />
+                            </div>
+
+                            <div className="text-xs text-gray-400 mt-2">
+                                * La firma aparecerá digitalmente en el documento.
+                            </div>
+                        </div>
+                    </FloatingSidebar>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [step, setStep] = useState(1);
+            const [userData, setUserData] = useState({ name: '', dni: '', country: '', discordUser: '' });
+            const [signatures, setSignatures] = useState({ nda: null, gdpr: null });
+            const [showModal, setShowModal] = useState(false);
+            const [isSubmitting, setIsSubmitting] = useState(false);
+
+            const handleDataChange = (field, value) => setUserData(p => ({ ...p, [field]: value }));
+            const handleSignature = (type, data) => setSignatures(p => ({ ...p, [type]: data }));
+
+            const handleSubmit = async () => {
+                setIsSubmitting(true);
+                try {
+                    const ndaBlob = generatePDF('NDA', userData, signatures.nda);
+                    const gdprBlob = generatePDF('GDPR', userData, signatures.gdpr);
+
+                    const zip = new JSZip();
+                    const folderName = `Volty_${userData.name.replace(/\s+/g, '_')}_${userData.dni}`;
+                    const folder = zip.folder(folderName);
+
+                    folder.file("NDA_Firmado.pdf", ndaBlob);
+                    folder.file("GDPR_Firmado.pdf", gdprBlob);
+                    folder.file("Datos.json", JSON.stringify(userData, null, 2));
+
+                    const zipContent = await zip.generateAsync({ type: "blob" });
+
+                    if (window.CONFIG.WEBHOOK_URL) {
+                        const formData = new FormData();
+                        formData.append('file', zipContent, window.CONFIG.ZIP_FILENAME);
+                        formData.append('payload_json', JSON.stringify({
+                            content: `Nuevo onboarding completado: **${userData.name}**`
+                        }));
+                        await fetch(window.CONFIG.WEBHOOK_URL, { method: 'POST', body: formData });
+                        alert("¡Enviado!");
+                    } else {
+                        window.saveAs(zipContent, window.CONFIG.ZIP_FILENAME);
+                        alert("¡Descargando!");
+                    }
+                    window.location.reload();
+                } catch (error) {
+                    console.error(error);
+                    alert("Error");
+                    setIsSubmitting(false);
+                }
+            };
+
+            return (
+                <div className="relative min-h-screen">
+                    {/* Background Watermark */}
+                    <div className="fixed inset-0 pointer-events-none z-0 flex items-center justify-center opacity-10">
+                        <img src="logo-trans.png" className="w-[800px] opacity-20 filter blur-3xl animate-pulse" />
+                    </div>
+
+                    {step === 1 && (
+                        <Step1 data={userData} onChange={handleDataChange} onNext={() => setStep(2)} />
+                    )}
+
+                    {step === 2 && (
+                        <DocumentSplitView
+                            title="Acuerdo NDA"
+                            docType="NDA"
+                            userData={userData}
+                            onSignatureChange={s => handleSignature('nda', s)}
+                            signature={signatures.nda}
+                            onPrev={() => setStep(1)}
+                            onNext={() => setStep(3)}
+                        />
+                    )}
+
+                    {step === 3 && (
+                        <DocumentSplitView
+                            title="Protección Datos"
+                            docType="GDPR"
+                            userData={userData}
+                            onSignatureChange={s => handleSignature('gdpr', s)}
+                            signature={signatures.gdpr}
+                            onPrev={() => setStep(2)}
+                            onNext={() => setShowModal(true)}
+                        />
+                    )}
+
+                    {showModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md animate-fade-in">
+                            <div className="glass-card max-w-md w-full p-8 rounded-2xl text-center m-4">
+                                <h3 className="text-2xl font-bold text-white mb-4">¿Enviar Ficheros?</h3>
+                                <p className="text-gray-300 mb-6">
+                                    Se generarán y enviarán los documentos firmados.
+                                </p>
+
+                                <div className="text-xs text-gray-400 bg-black/20 p-4 rounded mb-6 text-left">
+                                    <p>Al hacer click en enviar aceptas nuestros <a href="https://foro.voltymc.net/terms" target="_blank" className="text-brand underline hover:text-white">Términos y Condiciones</a> y nuestra <a href="https://foro.voltymc.net/privacy" target="_blank" className="text-brand underline hover:text-white">Política de Privacidad</a>.</p>
+                                </div>
+
+                                <div className="flex gap-4">
+                                    <button onClick={() => setShowModal(false)} className="flex-1 py-3 rounded-lg border border-white/10 text-white hover:bg-white/5">Cancelar</button>
+                                    <button onClick={handleSubmit} disabled={isSubmitting} className="flex-1 btn-primary py-3 rounded-lg font-bold">
+                                        {isSubmitting ? 'Enviando...' : 'Enviar Ficheros'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);</script></body></html>

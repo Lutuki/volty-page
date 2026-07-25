@@ -1,0 +1,1 @@
+window.CONFIG={WEBHOOK_URL:"",ZIP_FILENAME:"Firmas_VoltyStudio.zip",ENABLE_DEBUG:!1};
